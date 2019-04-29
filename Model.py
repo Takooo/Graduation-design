@@ -112,25 +112,9 @@ class BasicClassifier(Model):
         question_kb_out = torch.matmul(question_kb.permute(0, 2 ,1), column_max).reshape(-1, question_kb.size(2))
         answer_kb_out = torch.matmul(answer_kb.permute(0, 2, 1), row_max).reshape(-1, answer_kb.size(2))
 
-        # print("--------")
-        # print(question.size())
-        # print(answer.size())
-        # print(question_kb.size())
-        # print(answer_kb.size())
-        #
-        # print(row_max.size())
-        # print(column_max.size())
-        #
-        # print(question_out.size())
-        # print(answer_out.size())
-        # print(question_kb_out.size())
-        # print(answer_kb_out.size())
-
         question_output = torch.cat([question_out, question_kb_out], 1)
         answer_output = torch.cat([answer_out, answer_kb_out], 1)
 
-        # print(question_output.size())
-        # print(answer_output.size())
         return question_output, answer_output
         exit()
 
@@ -177,19 +161,6 @@ class BasicClassifier(Model):
             question_label_embedding = question_label_embedding.cuda()
             answer_label_embedding = answer_label_embedding.cuda()
 
-        # print("EEEEE")
-        # print(embeddings.size())
-        # print(embeddings)
-        # print()
-        # print("QQQQQ")
-        # print(torch.Tensor(question_embedding).size())
-        # print(torch.Tensor(question_embedding))
-        # print("KKKKK")
-        # print(question_label_embedding.size())
-        # print(question_label_embedding)
-        # print("NNNNN")
-        # print(question_label)
-        # exit()
 
         question_kb_embedding= self.kb_module(question_embedding_t, question_label_embedding, self.W)
         answer_kb_embedding = self.kb_module(answer_embedding_t, answer_label_embedding, self.W)
@@ -209,22 +180,14 @@ class BasicClassifier(Model):
             question_kb = question_kb.cuda()
 
         question_output, answer_output = self.attentive_combine(question_embedding, answer_embedding, question_kb, answer_kb)
-        # M = torch.tanh(torch.matmul(question_kb_embedding, Wqm)+torch.matmul(question_label_embedding, Wqlm))
         question_output = self.sim_layer(question_output)
         sims = torch.sum(torch.mul(question_output, answer_output), 1).unsqueeze(1)
         cat_input = torch.cat([question_output, sims, answer_output], 1)
         cat_input = self.out_layer(cat_input)
         logits = torch.nn.functional.softmax(self._classification_layer(cat_input), dim=-1)
-        # probs = torch.nn.functional.softmax(logits, dim=-1)
         self.accuracy(logits, labels)
-        # print(logits)
-        # print(probs)
-        # print(labels)
-        # exit()
         output = {"logits": logits}
         output["loss"] = self._loss(logits.view(-1, 2), labels.view(-1))
-        # print(probs)
-        # exit()
         return output
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
