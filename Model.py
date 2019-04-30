@@ -10,6 +10,7 @@ import torch
 import numpy as np
 import math
 from allennlp.data.vocabulary import Vocabulary
+from configparser import ConfigParser
 from allennlp.models import Model
 from allennlp.modules.text_field_embedders import TextFieldEmbedder
 from allennlp.nn.util import get_text_field_mask
@@ -20,32 +21,41 @@ class BasicClassifier(Model):
     def __init__(self,
                  word_embeddings: TextFieldEmbedder,
                  ent_embeddings,
-                 vocab: Vocabulary) -> None:
+                 vocab: Vocabulary,
+                 config: ConfigParser) -> None:
         super().__init__(vocab)
+        self.embeddings_feature = int(config.get('Model', 'embeddings_feature'))
+        self.sentence_max_length = int(config.get('Model', 'sentence_max_length'))
+        self.attention_size = int(config.get('Model', 'attention_size'))
+        self.out_hidenlayer_feature = int(config.get('Model', 'out_hidenlayer_feature'))
+        self.conv1_size = int(config.get('Model', 'conv1_size'))
+        self.conv2_size = int(config.get('Model', 'conv2_size'))
         self.word_embeddings = word_embeddings
         self.ent_embeddings = ent_embeddings
         self.hidden_layer = torch.nn.Linear(word_embeddings.get_output_dim(),
-                                          out_features=64)
-        self.cnn1 = torch.nn.Conv1d(40, 40, 2)
+                                          out_features=self.embeddings_feature)
+        self.cnn1 = torch.nn.Conv1d(self.sentence_max_length, self.sentence_max_length, 2)
         self.cnn1.bias.data.fill_(0.1)
         torch.nn.init.xavier_normal_(self.cnn1.weight)
-        self.cnn2 = torch.nn.Conv1d(40, 40, 3)
+        self.cnn2 = torch.nn.Conv1d(self.sentence_max_length, self.sentence_max_length, 3)
         self.cnn2.bias.data.fill_(0.1)
         torch.nn.init.xavier_normal_(self.cnn2.weight)
         self.softmax = torch.nn.Softmax(-1)
-        self.sim_layer = torch.nn.Linear(189, 189)
-        self.out_layer = torch.nn.Linear(379, 200)
-        self._classification_layer = torch.nn.Linear(200, 2)
+        sim_size = self.embeddings_feature*3-self.conv1_size-self.conv2_size+2
+        self.sim_layer = torch.nn.Linear(sim_size, sim_size)
+        out_layer_input = sim_size*2+1
+        self.out_layer = torch.nn.Linear(out_layer_input, self.out_hidenlayer_feature)
+        self._classification_layer = torch.nn.Linear(self.out_hidenlayer_feature, 2)
         self.accuracy = CategoricalAccuracy()
         self._loss = torch.nn.CrossEntropyLoss()
 
         self.W = {
-            'Whm': torch.autograd.Variable(torch.FloatTensor(64, 200).uniform_(-1, 1), requires_grad=True),
-            'Wem': torch.autograd.Variable(torch.FloatTensor(64, 200).uniform_(-1, 1), requires_grad=True),
-            'Wms': torch.autograd.Variable(torch.FloatTensor(200, 1).uniform_(-1, 1), requires_grad=True)
+            'Whm': torch.autograd.Variable(torch.FloatTensor(self.embeddings_feature, self.attention_size).uniform_(-1, 1), requires_grad=True),
+            'Wem': torch.autograd.Variable(torch.FloatTensor(self.embeddings_feature, self.attention_size).uniform_(-1, 1), requires_grad=True),
+            'Wms': torch.autograd.Variable(torch.FloatTensor(self.attention_size, 1).uniform_(-1, 1), requires_grad=True)
         }
 
-        self.U1 = torch.autograd.Variable(torch.nn.init.xavier_uniform_(torch.Tensor(64, 64)), requires_grad=True)
+        self.U1 = torch.autograd.Variable(torch.nn.init.xavier_uniform_(torch.Tensor(self.embeddings_feature, self.embeddings_feature)), requires_grad=True)
         self.U2 = torch.autograd.Variable(torch.nn.init.xavier_uniform_(torch.Tensor(125, 125)), requires_grad=True)
 
         if torch.cuda.is_available():
@@ -56,7 +66,7 @@ class BasicClassifier(Model):
             self.U2 = self.U2.cuda()
 
     def get_label_embedding(self, sentence_label):
-        label_embed = np.zeros((len(sentence_label), len(sentence_label[0]), len(sentence_label[0][0]), 64))
+        label_embed = np.zeros((len(sentence_label), len(sentence_label[0]), len(sentence_label[0][0]), self.embeddings_feature))
         for i, sentence in enumerate(sentence_label):
             for j, piece in enumerate(sentence):
                 for k, num in enumerate(piece):
@@ -128,7 +138,7 @@ class BasicClassifier(Model):
         n, l = embeddings.size(0), embeddings.size(1)
         embeddings = embeddings.reshape(n*l, embeddings.size(2))
         embeddings = self.hidden_layer(embeddings)
-        embeddings = embeddings.reshape(n, l, 64)
+        embeddings = embeddings.reshape(n, l, self.embeddings_feature)
         if torch.cuda.is_available():
             embeddings = embeddings.cuda()
 
@@ -139,8 +149,8 @@ class BasicClassifier(Model):
         question_embedding = []
         answer_embedding = []
         for i, embedding in enumerate(embeddings):
-            question_pad = torch.nn.ConstantPad2d((0, 0, 0, math.ceil(40-question_count[i])), 0)
-            answer_pad = torch.nn.ConstantPad2d((0, 0, 0, math.ceil(40 - answer_count[i])), 0)
+            question_pad = torch.nn.ConstantPad2d((0, 0, 0, math.ceil(self.sentence_max_length-question_count[i])), 0)
+            answer_pad = torch.nn.ConstantPad2d((0, 0, 0, math.ceil(self.sentence_max_length - answer_count[i])), 0)
             question_embedding.append(question_pad(embedding[1:shift[i]-1, :]).tolist())
             answer_embedding.append(answer_pad(embedding[shift[i]:answer_count[i]+shift[i]]).tolist())
 

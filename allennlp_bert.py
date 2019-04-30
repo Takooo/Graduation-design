@@ -8,38 +8,25 @@
 from typing import Iterator, List, Dict
 import torch
 import torch.optim as optim
-import numpy as np
 from allennlp.data import Instance
 from allennlp.data.fields import TextField, LabelField
 from allennlp.data.dataset_readers import DatasetReader
-from allennlp.common.file_utils import cached_path
 from allennlp.data.token_indexers import TokenIndexer, SingleIdTokenIndexer, PretrainedBertIndexer
 from allennlp.data.tokenizers import Token
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.models import Model
 from allennlp.modules.text_field_embedders import TextFieldEmbedder, BasicTextFieldEmbedder
 from allennlp.modules.token_embedders import BertEmbedder, PretrainedBertEmbedder
-from allennlp.modules.seq2seq_encoders import PassThroughEncoder
 from allennlp.modules.seq2vec_encoders.cnn_encoder import CnnEncoder, Seq2VecEncoder
 from allennlp.nn.util import get_text_field_mask, sequence_cross_entropy_with_logits
 from allennlp.training.metrics import CategoricalAccuracy
 from allennlp.data.iterators import BasicIterator
 from allennlp.training.trainer import Trainer
-from allennlp.predictors import SentenceTaggerPredictor
 
 torch.manual_seed(1)
 
 def simple_accuracy(preds, labels):
     return (preds == labels).mean()
-
-def getEntityEmbeddings(self, file_path: str):
-    emb_matrix = [[0] * 64]
-    with open(file_path, "rb") as f:
-        for line in f:
-            line = line.strip()
-            items = line.split()
-            emb_matrix.append(map(float, items[1:]))
-    return emb_matrix
 
 class MyDatasetReader(DatasetReader):
     """
@@ -64,17 +51,8 @@ class MyDatasetReader(DatasetReader):
             fields["labels"] = label_field
 
         return Instance(fields)
-
-    def _read(self, file_path: str, label_file_path: str) -> Iterator[Instance]:
-        vec_dict = {}
-        with open(file_path) as f, open(label_file_path) as fl:
-            for line in fl:
-                l = line.lower().strip().split("\t")
-                vec = [map(int, x.split(" ")) for x in l[1:]]
-                for i in range(512 - len(vec)):
-                    vec.append([0] * len(vec[0]))
-                vec_dict[l[0]] = vec[:512]
-
+    def _read(self, file_path: str) -> Iterator[Instance]:
+        with open(file_path) as f:
             for line in f:
                 questions, answers, label = line.strip().split('\t')
                 questions = questions.split()
@@ -93,7 +71,8 @@ class BasicClassifier(Model):
         self._seq2vec_encoder = seq2vec_encoder
         self._classification_layer = torch.nn.Linear(word_embeddings.get_output_dim(),
                                           out_features=2)
-
+        torch.nn.init.xavier_normal_(self._classification_layer.weight)
+        self.dropout = torch.nn.Dropout()
         self.accuracy = CategoricalAccuracy()
         self._loss = torch.nn.CrossEntropyLoss()
 
@@ -103,25 +82,34 @@ class BasicClassifier(Model):
         mask = get_text_field_mask(sentence)
         embeddings = self.word_embeddings(sentence)
         embeddings = embeddings[:,0,:]
+        # embeddings = embeddings.normal_()
+        # embeddings = self.dropout(embeddings)
         logits = self._classification_layer(embeddings)
         # probs = torch.nn.functional.sigmoid(logits)
-        probs = torch.nn.functional.log_softmax(logits, dim=1)
-        print(probs.view(-1, 2).size(0))
-        print(labels.view(-1).size())
-        exit()
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        logits = logits = torch.nn.functional.softmax(logits, dim=-1)
+        # print(logits)
+        # exit()
+        self.accuracy(logits, labels)
+        # print(acc.get_metric())
         output = {"logits": logits, "probs": probs}
-        output["loss"] = self._loss(logits.view(-1, 2), labels.view(-1))
-        return output
+        try:
+            output["loss"] = self._loss(logits, labels)
+        except:
+            print(logits)
+            print(labels)
+            exit()
 
+        return output
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         return {"accuracy": self.accuracy.get_metric(reset)}
 
-reader = MyDatasetReader(token_indexers={"tokens": PretrainedBertIndexer('/Users/takoo/Public/pretrained/bert-base-uncased')})
-train_dataset = reader.read('/Users/takoo/Public/tmp/data/wikiQA-train.txt')
-validation_dataset = reader.read('/Users/takoo/Public/tmp/data/wikiQA-test.txt')
+reader = MyDatasetReader(token_indexers={"tokens": PretrainedBertIndexer('/home/zhangfan/uncased_L-12_H-768_A-12')})
+train_dataset = reader.read('/home/zhangfan/data/wikiQA-train.txt')
+validation_dataset = reader.read('/home/zhangfan/data/wikiQA-test.txt')
 vocab = Vocabulary.from_instances(train_dataset + validation_dataset)
 
-token_embedding = PretrainedBertEmbedder(pretrained_model="/Users/takoo/Public/pretrained/bert-base-uncased")
+token_embedding = PretrainedBertEmbedder(pretrained_model="/home/zhangfan/uncased_L-12_H-768_A-12")
 word_embeddings = BasicTextFieldEmbedder({"tokens": token_embedding}, allow_unmatched_keys=True)
 
 cnn_encoder = CnnEncoder(word_embeddings.get_output_dim(), num_filters=100,
@@ -135,8 +123,8 @@ if torch.cuda.is_available():
     model = model.cuda(cuda_device)
 else:
     cuda_device = -1
-optimizer = optim.Adam(model.parameters())
-iterator = BasicIterator(batch_size=32)
+optimizer = optim.Adam(model.parameters(), lr = 5e-4)
+iterator = BasicIterator(batch_size=128)
 iterator.index_with(vocab)
 trainer = Trainer(model=model,
                   optimizer=optimizer,
@@ -144,7 +132,7 @@ trainer = Trainer(model=model,
                   train_dataset=train_dataset,
                   validation_dataset=validation_dataset,
                   patience=10,
-                  num_epochs=1000,
+                  num_epochs=5,
                   cuda_device=cuda_device)
 trainer.train()
 

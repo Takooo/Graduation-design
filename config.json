@@ -1,0 +1,30 @@
+[local_file]
+BERT_BASE_UNCASED = /Users/takoo/Public/pretrained/bert-base-uncased
+WIKIQA_TRAIN = /Users/takoo/Public/tmp/data/wikiQA-train.txt
+WIKIQA_TEST = /Users/takoo/Public/tmp/data/wikiQA-test.txt
+WIKIQA_TRAIN_LABEL = /Users/takoo/Public/tmp/data/wikiQA-train.txt.labeled
+WIKIQA_TEST_LABEL = /Users/takoo/Public/tmp/data/wikiQA-test.txt.labeled
+WIKIQA_KB_EMBED = /Users/takoo/Public/tmp/embed/fb5m-wiki.transE
+
+[server_file]
+BERT_BASE_UNCASED = /home/zhangfan/uncased_L-12_H-768_A-12
+WIKIQA_TRAIN = /home/zhangfan/data/wikiQA-train.txt
+WIKIQA_TEST = /home/zhangfan/data/wikiQA-test.txt
+WIKIQA_TRAIN_LABEL = /home/zhangfan/data/wikiQA-train.txt.labeled
+WIKIQA_TEST_LABEL = /home/zhangfan/data/wikiQA-test.txt.labeled
+WIKIQA_KB_EMBED = /home/zhangfan/embed/fb5m-wiki.transE
+
+[iterator]
+batch_size = 32
+
+[Train]
+patience = 10
+num_epochs = 10
+
+[Model]
+embeddings_feature = 64
+sentence_max_length = 40
+attention_size = 200
+out_hidenlayer_feature = 200
+conv1_size = 2
+conv2_size = 3

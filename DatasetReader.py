@@ -14,18 +14,11 @@ from allennlp.data.tokenizers import Token
 from allennlp.common import Tqdm
 
 class MyDatasetReader(DatasetReader):
-    """
-    DatasetReader for PoS tagging data, one sentence per line, like
-
-        The###DET dog###NN ate###V the###DET apple###NN
-    """
-
-    def __init__(self, token_indexers: Dict[str, TokenIndexer] = None, max_pieces: int = 40) -> None:
+    def __init__(self, token_indexers: Dict[str, TokenIndexer] = None, max_pieces: int = 40, ent_embed_size: int = 64) -> None:
         super().__init__(lazy=False)
         self.token_indexers = token_indexers
         self.max_pieces = max_pieces
-        self.ent_embed_size = 64
-
+        self.ent_embed_size = ent_embed_size
 
     def getEntData(self, label_file_path: str):
         vec_dict = {}
