@@ -1,21 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# @Time    : 2019/4/20
+# @Time    : 2019/5/1
 # @Author  : Takoo
-# @File    : Train.py
+# @File    : KABLSTM_Train.py
 # @Software: PyCharm
 
 import torch
 import torch.optim as optim
 import configparser
-from allennlp.data.token_indexers import PretrainedBertIndexer
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder
-from allennlp.modules.token_embedders import PretrainedBertEmbedder
+from allennlp.modules.token_embedders import PretrainedBertEmbedder,Embedding
 from allennlp.data.iterators import BasicIterator
 from allennlp.training.trainer import Trainer
-from DatasetReader import MyDatasetReader
-from Model import BasicClassifier
+from KABLSTM_DatasetReader import MyDatasetReader
+from KABLSTM_Model import BasicClassifier
 
 
 config = configparser.ConfigParser()
@@ -35,14 +34,19 @@ WIKIQA_TEST = config.get('server_file', 'WIKIQA_TEST')
 WIKIQA_TRAIN_LABEL = config.get('server_file', 'WIKIQA_TRAIN_LABEL')
 WIKIQA_TEST_LABEL = config.get('server_file', 'WIKIQA_TEST_LABEL')
 WIKIQA_KB_EMBED = config.get('server_file', 'WIKIQA_KB_EMBED')
+GLOVE_840B_300D = config.get('server_file', 'GLOVE_840B_300D')
 
-reader = MyDatasetReader(token_indexers={"tokens": PretrainedBertIndexer(BERT_BASE_UNCASED)})
+
+reader = MyDatasetReader()
 train_dataset = reader.read_f(WIKIQA_TRAIN, WIKIQA_TRAIN_LABEL)
 validation_dataset = reader.read_f(WIKIQA_TEST, WIKIQA_TEST_LABEL)
 ent_embeddings = reader.getEntityEmbeddings(WIKIQA_KB_EMBED)
 vocab = Vocabulary.from_instances(train_dataset + validation_dataset)
 
-token_embedding = PretrainedBertEmbedder(pretrained_model=BERT_BASE_UNCASED, requires_grad = True)
+token_embedding = Embedding(num_embeddings=vocab.get_vocab_size('tokens'),
+                            embedding_dim=300,
+                            pretrained_file = GLOVE_840B_300D,
+                            trainable = True)
 word_embeddings = BasicTextFieldEmbedder({"tokens": token_embedding}, allow_unmatched_keys=True)
 
 model = BasicClassifier(word_embeddings, ent_embeddings, vocab, config)

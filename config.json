@@ -13,13 +13,13 @@ WIKIQA_TEST = /home/zhangfan/data/wikiQA-test.txt
 WIKIQA_TRAIN_LABEL = /home/zhangfan/data/wikiQA-train.txt.labeled
 WIKIQA_TEST_LABEL = /home/zhangfan/data/wikiQA-test.txt.labeled
 WIKIQA_KB_EMBED = /home/zhangfan/embed/fb5m-wiki.transE
-
+GLOVE_840B_300D = /home/zhangfan/glove/glove.840B.300d.txt
 [iterator]
 batch_size = 32
 
 [Train]
 patience = 10
-num_epochs = 10
+num_epochs = 5
 
 [Model]
 embeddings_feature = 64
