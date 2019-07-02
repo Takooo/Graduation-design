@@ -6,22 +6,25 @@
 # @Software: PyCharm
 
 from typing import Iterator, List, Dict
+import os
 import torch
 import torch.optim as optim
 from allennlp.data import Instance
 from allennlp.data.fields import TextField, LabelField
 from allennlp.data.dataset_readers import DatasetReader
-from allennlp.data.token_indexers import TokenIndexer, SingleIdTokenIndexer, PretrainedBertIndexer
+from allennlp.data.token_indexers import TokenIndexer, PretrainedBertIndexer
 from allennlp.data.tokenizers import Token
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.models import Model
 from allennlp.modules.text_field_embedders import TextFieldEmbedder, BasicTextFieldEmbedder
-from allennlp.modules.token_embedders import BertEmbedder, PretrainedBertEmbedder
+from allennlp.modules.token_embedders import PretrainedBertEmbedder
 from allennlp.modules.seq2vec_encoders.cnn_encoder import CnnEncoder, Seq2VecEncoder
-from allennlp.nn.util import get_text_field_mask, sequence_cross_entropy_with_logits
-from allennlp.training.metrics import CategoricalAccuracy
+from allennlp.nn.util import get_text_field_mask
+from allennlp.training.metrics import CategoricalAccuracy, F1Measure
 from allennlp.data.iterators import BasicIterator
 from allennlp.training.trainer import Trainer
+from allennlp.training.util import evaluate
+from allennlp.common.util import dump_metrics
 
 torch.manual_seed(1)
 
@@ -74,6 +77,7 @@ class BasicClassifier(Model):
         torch.nn.init.xavier_normal_(self._classification_layer.weight)
         self.dropout = torch.nn.Dropout()
         self.accuracy = CategoricalAccuracy()
+        self.f1 = F1Measure(0)
         self._loss = torch.nn.CrossEntropyLoss()
 
     def forward(self,
@@ -91,6 +95,7 @@ class BasicClassifier(Model):
         # print(logits)
         # exit()
         self.accuracy(logits, labels)
+        self.f1(logits, labels)
         # print(acc.get_metric())
         output = {"logits": logits, "probs": probs}
         try:
@@ -102,12 +107,19 @@ class BasicClassifier(Model):
 
         return output
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        return {"accuracy": self.accuracy.get_metric(reset)}
+        precision, recall, f1_measure = self.f1.get_metric(reset)
+        return {"accuracy": self.accuracy.get_metric(reset), "precision": precision, "recall": recall, "f1_measure": f1_measure}
 
+# reader = MyDatasetReader(token_indexers={"tokens": PretrainedBertIndexer('/home/zhangfan/uncased_L-12_H-768_A-12')})
+# train_dataset = reader.read('/home/zhangfan/data/wikiQA-train.txt')
+# dev_dataset = reader.read('/home/zhangfan/data/wikiQA-dev.txt')
+# test_dataset = reader.read('/home/zhangfan/data/wikiQA-test.txt')
 reader = MyDatasetReader(token_indexers={"tokens": PretrainedBertIndexer('/home/zhangfan/uncased_L-12_H-768_A-12')})
-train_dataset = reader.read('/home/zhangfan/data/wikiQA-train.txt')
-validation_dataset = reader.read('/home/zhangfan/data/wikiQA-test.txt')
-vocab = Vocabulary.from_instances(train_dataset + validation_dataset)
+train_dataset = reader.read('/home/zhangfan/data/trecQA-train.txt')
+dev_dataset = reader.read('/home/zhangfan/data/trecQA-dev.txt')
+test_dataset = reader.read('/home/zhangfan/data/trecQA-test.txt')
+
+vocab = Vocabulary.from_instances(train_dataset + dev_dataset + test_dataset)
 
 token_embedding = PretrainedBertEmbedder(pretrained_model="/home/zhangfan/uncased_L-12_H-768_A-12")
 word_embeddings = BasicTextFieldEmbedder({"tokens": token_embedding}, allow_unmatched_keys=True)
@@ -130,12 +142,21 @@ trainer = Trainer(model=model,
                   optimizer=optimizer,
                   iterator=iterator,
                   train_dataset=train_dataset,
-                  validation_dataset=validation_dataset,
+                  validation_dataset=dev_dataset,
                   patience=10,
                   num_epochs=5,
                   cuda_device=cuda_device)
 trainer.train()
 
+
+metrics = trainer.train()
+print("train ended")
+test_metrics = evaluate(trainer.model, test_dataset, iterator,
+                                cuda_device=trainer._cuda_devices[0], # pylint: disable=protected-access,
+                                batch_weight_key="")
+for key, value in test_metrics.items():
+    metrics["test_" + key] = value
+dump_metrics(os.path.join("/home/zhangfan/trec_output/", "bert_metrics.json"), metrics, log=True)
 
 # predictor = SentenceTaggerPredictor(model, dataset_reader=reader)
 # tag_logits = predictor.predict("The dog ate the apple")['tag_logits']

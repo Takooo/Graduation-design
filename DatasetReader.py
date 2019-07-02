@@ -12,9 +12,11 @@ from allennlp.data.dataset_readers import DatasetReader
 from allennlp.data.token_indexers import TokenIndexer
 from allennlp.data.tokenizers import Token
 from allennlp.common import Tqdm
-
+@DatasetReader.register("bert_know_reader")
 class MyDatasetReader(DatasetReader):
-    def __init__(self, token_indexers: Dict[str, TokenIndexer] = None, max_pieces: int = 40, ent_embed_size: int = 64) -> None:
+    def __init__(self, token_indexers: Dict[str, TokenIndexer] = None,
+                 max_pieces: int = 40,
+                 ent_embed_size: int = 64) -> None:
         super().__init__(lazy=False)
         self.token_indexers = token_indexers
         self.max_pieces = max_pieces

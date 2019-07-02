@@ -14,7 +14,7 @@ from configparser import ConfigParser
 from allennlp.models import Model
 from allennlp.modules.text_field_embedders import TextFieldEmbedder
 from allennlp.nn.util import get_text_field_mask
-from allennlp.training.metrics import CategoricalAccuracy
+from allennlp.training.metrics import CategoricalAccuracy, F1Measure
 
 
 class BasicClassifier(Model):
@@ -47,6 +47,7 @@ class BasicClassifier(Model):
         self.out_layer = torch.nn.Linear(out_layer_input, self.out_hidenlayer_feature)
         self._classification_layer = torch.nn.Linear(self.out_hidenlayer_feature, 2)
         self.accuracy = CategoricalAccuracy()
+        self.f1 = F1Measure(0)
         self._loss = torch.nn.CrossEntropyLoss()
 
         self.W = {
@@ -196,9 +197,11 @@ class BasicClassifier(Model):
         cat_input = self.out_layer(cat_input)
         logits = torch.nn.functional.softmax(self._classification_layer(cat_input), dim=-1)
         self.accuracy(logits, labels)
+        self.f1(logits, labels)
         output = {"logits": logits}
         output["loss"] = self._loss(logits.view(-1, 2), labels.view(-1))
         return output
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        return {"accuracy": self.accuracy.get_metric(reset)}
+        precision, recall, f1_measure = self.f1.get_metric(reset)
+        return {"accuracy": self.accuracy.get_metric(reset), "precision": precision, "recall": recall, "f1_measure": f1_measure}

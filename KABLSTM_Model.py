@@ -14,7 +14,7 @@ from configparser import ConfigParser
 from allennlp.models import Model
 from allennlp.modules.text_field_embedders import TextFieldEmbedder
 from allennlp.modules.elmo_lstm import ElmoLstm
-from allennlp.training.metrics import CategoricalAccuracy
+from allennlp.training.metrics import CategoricalAccuracy, F1Measure
 
 MAX_LEN = 250
 
@@ -25,7 +25,7 @@ class BasicClassifier(Model):
                  vocab: Vocabulary,
                  config: ConfigParser) -> None:
         super().__init__(vocab)
-        self.encoder = ElmoLstm(300, 64, 7, 3)
+        self.encoder = ElmoLstm(300, 64, 4, 1)
         self.embeddings_feature = int(config.get('Model', 'embeddings_feature'))
         self.sentence_max_length = int(config.get('Model', 'sentence_max_length'))
         self.attention_size = int(config.get('Model', 'attention_size'))
@@ -49,6 +49,7 @@ class BasicClassifier(Model):
         self.out_layer = torch.nn.Linear(out_layer_input, self.out_hidenlayer_feature)
         self._classification_layer = torch.nn.Linear(self.out_hidenlayer_feature, 2)
         self.accuracy = CategoricalAccuracy()
+        self.f1 = F1Measure(0)
         self._loss = torch.nn.CrossEntropyLoss()
 
         self.W = {
@@ -141,12 +142,23 @@ class BasicClassifier(Model):
         question_len = question_embeddings.size(1)
         answer_len = answer_embeddings.size(1)
         batch_size = question_embeddings.size(0)
-        question_pad = torch.nn.ConstantPad2d((0, 0, 0, math.ceil(MAX_LEN - question_len)), 0)
-        answer_pad = torch.nn.ConstantPad2d((0, 0, 0, math.ceil(MAX_LEN - answer_len)), 0)
+        question_pad = torch.nn.ConstantPad2d((0, 0, 0, math.ceil(self.sentence_max_length - question_len)), 0)
+        answer_pad = torch.nn.ConstantPad2d((0, 0, 0, math.ceil(self.sentence_max_length - answer_len)), 0)
         question_embeddings = question_pad(question_embeddings)
         answer_embeddings = answer_pad(answer_embeddings)
-        question_mask = torch.LongTensor(np.concatenate((np.ones([batch_size, question_len]), np.zeros([batch_size, MAX_LEN - question_len])), 1))
-        answer_mask = torch.LongTensor(np.concatenate((np.ones([batch_size, answer_len]), np.zeros([batch_size, MAX_LEN - answer_len])), 1))
+        if question_len < self.sentence_max_length:
+            question_mask = torch.LongTensor(np.concatenate(
+                (np.ones([batch_size, question_len]), np.zeros([batch_size, self.sentence_max_length - question_len])),
+                1))
+        else:
+            question_mask = torch.LongTensor(np.ones([batch_size, self.sentence_max_length]))
+        if answer_len < self.sentence_max_length:
+            answer_mask = torch.LongTensor(np.concatenate(
+                (np.ones([batch_size, answer_len]), np.zeros([batch_size, self.sentence_max_length - answer_len])), 1))
+        else:
+            answer_mask = torch.LongTensor(np.ones([batch_size, self.sentence_max_length]))
+        # question_mask = torch.LongTensor(np.concatenate((np.ones([batch_size, question_len]), np.zeros([batch_size, self.sentence_max_length - question_len])), 1))
+        # answer_mask = torch.LongTensor(np.concatenate((np.ones([batch_size, answer_len]), np.zeros([batch_size, self.sentence_max_length - answer_len])), 1))
         # exit()
 
         # q_n, q_l = question_embeddings.size(0), question_embeddings.size(1)
@@ -165,8 +177,8 @@ class BasicClassifier(Model):
             question_mask = question_mask.cuda()
             answer_mask = answer_mask.cuda()
         try:
-            question_encode = self.encoder(question_embeddings, question_mask)[2]
-            answer_encode = self.encoder(answer_embeddings, answer_mask)[2]
+            question_encode = self.encoder(question_embeddings, question_mask)[0]
+            answer_encode = self.encoder(answer_embeddings, answer_mask)[0]
         except:
             print(question_embeddings.size())
             print(answer_embeddings.size())
@@ -176,8 +188,8 @@ class BasicClassifier(Model):
 
         question_embeddings = self.hidden_layer(question_encode)
         answer_embeddings = self.hidden_layer(answer_encode)
-        question_embeddings = question_embeddings.reshape(batch_size, MAX_LEN, self.embeddings_feature)
-        answer_embeddings = answer_embeddings.reshape(batch_size, MAX_LEN, self.embeddings_feature)
+        question_embeddings = question_embeddings.reshape(batch_size, self.sentence_max_length, self.embeddings_feature)
+        answer_embeddings = answer_embeddings.reshape(batch_size, self.sentence_max_length, self.embeddings_feature)
 
         # type_ids = sentence['tokens-type-ids']
         # shift = [id.tolist().index(1) for id in type_ids]
@@ -191,10 +203,10 @@ class BasicClassifier(Model):
         #     question_embedding.append(question_pad(embedding[1:shift[i]-1, :]).tolist())
         #     answer_embedding.append(answer_pad(embedding[shift[i]:answer_count[i]+shift[i]]).tolist())
 
-        cut = torch.nn.ConstantPad2d((0, 0, 0, -210), 0)
+        # cut = torch.nn.ConstantPad2d((0, 0, 0, -210), 0)
 
-        question_embedding = cut(question_embeddings).normal_()
-        answer_embedding = cut(answer_embeddings).normal_()
+        question_embedding = torch.zeros(question_embeddings.size()) # question_embeddings.normal_()
+        answer_embedding = torch.zeros(answer_embeddings.size()) # answer_embeddings.normal_()
 
         question_embedding_t = question_embedding.unsqueeze(2).repeat(1, 1, 5, 1)
         answer_embedding_t = answer_embedding.unsqueeze(2).repeat(1, 1, 5, 1)
@@ -229,15 +241,30 @@ class BasicClassifier(Model):
             question_kb = question_kb.cuda()
 
         question_output, answer_output = self.attentive_combine(question_embedding, answer_embedding, question_kb, answer_kb)
+        # cut = torch.nn.ConstantPad2d((0, -180, 0, 0), 0)
+        # question_output = cut(question_output)
+        # answer_output = cut(answer_output)
+        # pad = torch.nn.ConstantPad2d((0, 180, 0, 0), 0)
+        # question_output = pad(question_output)
+        # answer_output = pad(answer_output)
         question_output = self.sim_layer(question_output)
         sims = torch.sum(torch.mul(question_output, answer_output), 1).unsqueeze(1)
         cat_input = torch.cat([question_output, sims, answer_output], 1)
         cat_input = self.out_layer(cat_input)
+        # print(cat_input)
+        cat_input = cat_input + (torch.randn(cat_input.size())*300).cuda()
+        cat_input = cat_input + (torch.randn(cat_input.size())*300).cuda()
+
+        # print(cat_input)
+        # exit()
         logits = torch.nn.functional.softmax(self._classification_layer(cat_input), dim=-1)
+        # logits = torch.rand(logits.size()).cuda()
         self.accuracy(logits, labels)
+        self.f1(logits, labels)
         output = {"logits": logits}
         output["loss"] = self._loss(logits.view(-1, 2), labels.view(-1))
         return output
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        return {"accuracy": self.accuracy.get_metric(reset)}
+        precision, recall, f1_measure = self.f1.get_metric(reset)
+        return {"accuracy": self.accuracy.get_metric(reset), "precision": precision, "recall": recall, "f1_measure": f1_measure}

@@ -31,8 +31,8 @@ batch_size = 14
 [Train]
 patience = 2
 num_epochs = 1
-wiliqa_serialization_dir = /home/zhangfan/output/WIKIQA_output
-trecqa_serialization_dir = /home/zhangfan/output/TRECQA_output
+wiliqa_serialization_dir = /home/zhangfan/output/BERT_WIKIQA_output
+trecqa_serialization_dir = /home/zhangfan/output/BERT_TRECQA_output
 
 [Model]
 embeddings_feature = 64
